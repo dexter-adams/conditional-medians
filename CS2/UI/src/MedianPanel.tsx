@@ -31,7 +31,7 @@ export const MedianPanel = () => {
     <Panel className={styles.panel} contentClassName={styles.content} draggable initialPosition={{ x: 0.16, y: 0.35 }}
       header="Conditional Medians" onClose={toggleTool}>
       <div className={styles.intro}>
-        Hover a junction on a road with a built-in median. Click to close its median opening, or to reopen it.
+        Hover a junction on a road with a built-in or painted median. Click to close its median opening, or to reopen it.
         Blue: can be closed. Orange: closed, click to reopen. Red: cannot be closed yet.
       </div>
       <div className={styles.label}>Junction</div>
