@@ -1,6 +1,6 @@
 # Conditional Medians
 
-A Cities: Skylines II mod that closes the opening in a divided road's built-in median at a junction. The road's own median runs through the junction, car turns across it leave the route network, and the crosswalks stay.
+A Cities: Skylines II mod that closes the opening in a divided road's built-in median at a junction. The road's own median runs through the junction, car turns across it leave the route network, and the crosswalks stay. On a road with a painted center line instead, the line is continued through the junction and the same turns are removed.
 
 [Install from Paradox Mods](https://mods.paradoxplaza.com/mods/168662/Windows)
 
