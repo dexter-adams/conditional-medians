@@ -44,6 +44,11 @@ namespace ConditionalMedians2
 
     internal struct MedianGeometry
     {
+        // A painted median (a center line or a painted strip between the two
+        // directions): nothing is built; its paint is continued through the
+        // junction and the turns across it are cut. Not saved: read from the
+        // roads each time, so a closure keeps the same save format.
+        internal bool Painted;
         internal float HalfWidth;
         internal const float HalfHeight = 2f;
         internal float3 Center;

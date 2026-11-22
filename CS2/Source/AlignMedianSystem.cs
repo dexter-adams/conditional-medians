@@ -142,6 +142,8 @@ namespace ConditionalMedians2
             foreach (Entity node in nodes)
             {
                 var median = EntityManager.GetComponentData<ClosedMedian>(node);
+                // A painted median has no divider to fit or draw.
+                if (medians.IsPainted(node)) continue;
                 // The game recomputes the junction geometry of each updated road,
                 // a side street included, and that drops this fit's join on it.
                 // Fitting again from roads the game left alone returns the same rails.

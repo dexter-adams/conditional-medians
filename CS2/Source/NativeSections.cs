@@ -66,6 +66,23 @@ namespace ConditionalMedians2
         internal bool IsPrepared(Entity prefab) =>
             prepared.TryGetValue(prefab, out var known) && IsPrepared(prefab, known);
 
+        // Whether a road type has a built divider the mod can close, read from
+        // the prefab alone: on the frame a city loads, no road has selected its
+        // compositions yet.
+        internal bool HasDivider(Entity prefab)
+        {
+            if (prepared.ContainsKey(prefab)) return true;
+            if (undivided.Contains(prefab) || !manager.HasBuffer<NetGeometrySection>(prefab)) return false;
+            foreach (var section in manager.GetBuffer<NetGeometrySection>(prefab, true))
+            {
+                if ((section.m_Flags & PhysicalMedian) != NetSectionFlags.Median ||
+                    !manager.HasBuffer<NetSectionPiece>(section.m_Section)) continue;
+                foreach (var piece in manager.GetBuffer<NetSectionPiece>(section.m_Section, true))
+                    if (IsDividerRule(piece)) return true;
+            }
+            return false;
+        }
+
         internal void Prepare(Entity prefab)
         {
             if (undivided.Contains(prefab)) return;

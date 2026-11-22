@@ -96,6 +96,22 @@ namespace ConditionalMedians2
         // that ends nearer than the bare setback takes that gap from the bar.
         private const float DefaultSetback = 0.05f;
 
+        // A road's direction at the junction mouth, pointing away from the
+        // junction, from the road's drawn edges there. On a curved road this
+        // differs from its direction at the junction's center.
+        internal static bool Outward(EntityManager entities, Entity edge, Entity node, out float2 outward)
+        {
+            outward = default;
+            if (!entities.TryGetComponent<Game.Net.Edge>(edge, out var ends) ||
+                !entities.TryGetComponent<Game.Net.EdgeGeometry>(edge, out var shape)) return false;
+            float3 tangent = ends.m_Start == node
+                ? math.normalizesafe(MathUtils.StartTangent(shape.m_Start.m_Left)) + math.normalizesafe(MathUtils.StartTangent(shape.m_Start.m_Right))
+                : -math.normalizesafe(MathUtils.EndTangent(shape.m_End.m_Left)) - math.normalizesafe(MathUtils.EndTangent(shape.m_End.m_Right));
+            if (math.lengthsq(tangent.xz) < 0.0001f) return false;
+            outward = math.normalize(tangent.xz);
+            return true;
+        }
+
         // A drawn lane that carries no traffic and is not hidden: a road
         // marking someone can see, the game's or another mod's.
         internal static bool IsVisibleMarking(EntityManager entities, Entity lane) =>
@@ -120,9 +136,16 @@ namespace ConditionalMedians2
         // axis and -1 for the other; outward is the road's direction at the
         // junction, pointing away from it. Each line is measured against its
         // own road, which may meet the median's axis at an angle.
+        // A painted median's own lines lie on or beside its axis: a center line
+        // (single, or double drawn as one marking) on it, or a pair of lines a
+        // little either side, within the paint's half width plus this.
+        private const float CenterReach = 0.4f;
+        private const float CenterTolerance = 0.08f;
+
         internal static void FindSources(EntityManager entities, List<Entity> lanes, float sign, float2 outward,
             MedianGeometry median, Source[] found, bool[] has, System.Text.StringBuilder why = null)
         {
+            bool center = median.Painted;
             has[0] = has[1] = false;
             if (lanes == null)
             {
@@ -151,17 +174,23 @@ namespace ConditionalMedians2
                 float bz = math.dot(b, across);
                 float reach = math.dot(e, outward);
                 string rejected =
-                    // Beside the divider on one side, and running along the road near its end.
+                    // A painted median's line on or beside its axis; a divider's
+                    // edge line beside it on one side. Either running along the
+                    // road near its end.
+                    center ? (math.abs(ez) > median.HalfWidth + CenterReach || math.abs(bz) > median.HalfWidth + CenterReach ? "offset" : null) :
                     ez * bz <= 0f ? "crosses the axis" :
-                    math.abs(ez) < median.HalfWidth * 0.5f || math.abs(ez) > median.HalfWidth + MaximumOffset ? "offset" :
-                    math.abs(ez - bz) > 0.3f ? "not parallel" :
+                    math.abs(ez) < median.HalfWidth * 0.5f || math.abs(ez) > median.HalfWidth + MaximumOffset ? "offset" : null;
+                rejected = rejected ??
+                    (math.abs(ez - bz) > 0.3f ? "not parallel" :
                     // Ending at or before the junction mouth, coming from this approach.
                     reach < -1f || reach > MaximumGap ? "ends elsewhere" :
-                    math.dot(b, outward) - reach < 1f ? "points away" : null;
+                    math.dot(b, outward) - reach < 1f ? "points away" : null);
                 if (math.abs(reach) < 8f)
                     why?.Append($" {lane.Index} end ({reach:F2},{ez:F2}) back {bz:F2} {rejected ?? "kept"};");
                 if (rejected != null) continue;
-                int side = ez > 0f ? 0 : 1;
+                // A center line on the axis counts as the left one, so both
+                // approaches agree on it whatever side of zero it reads.
+                int side = center && math.abs(ez) <= CenterTolerance ? 0 : ez > 0f ? 0 : 1;
                 if (has[side] && found[side].Reach <= reach) continue;
                 found[side] = new Source
                 {
@@ -173,7 +202,9 @@ namespace ConditionalMedians2
                     Mouth = mouth,
                     Outward = outward,
                     Across = across,
-                    Lateral = ez
+                    // A center line on the axis belongs to both sides, so the
+                    // stop bar of either approach's incoming side can cut it.
+                    Lateral = center && math.abs(ez) <= CenterTolerance ? 0f : ez
                 };
                 has[side] = true;
             }
@@ -508,6 +539,32 @@ namespace ConditionalMedians2
             return false;
         }
 
+        // The stretches of the curve that a visible marking of the junction
+        // itself already paints (the game draws a piece of center line through
+        // a T-junction), added as cuts so a painted median's continuation only
+        // fills what that line leaves. Mouth -1: such a cut pairs with no stop bar.
+        internal static int CutAtLines(EntityManager entities, List<Entity> lanes, Bezier4x3 curve, List<Gap> cuts)
+        {
+            if (lanes == null) return 0;
+            int count = 0;
+            foreach (var lane in lanes)
+            {
+                if (!IsVisibleMarking(entities, lane)) continue;
+                var other = entities.GetComponentData<Curve>(lane);
+                if (other.m_Length < 1f) continue;
+                float3 middle = MathUtils.Position(other.m_Bezier, 0.5f);
+                if (MathUtils.Distance(curve.xz, middle.xz, out float t) > 0.5f) continue;
+                float2 along = math.normalizesafe(MathUtils.Tangent(other.m_Bezier, 0.5f).xz);
+                float2 ours = math.normalizesafe(MathUtils.Tangent(curve, t).xz);
+                if (math.abs(math.dot(along, ours)) <= 0.9f) continue;
+                MathUtils.Distance(curve.xz, other.m_Bezier.a.xz, out float ta);
+                MathUtils.Distance(curve.xz, other.m_Bezier.d.xz, out float td);
+                cuts.Add(new Gap { From = math.min(ta, td), To = math.max(ta, td), Stop = false, Mouth = -1 });
+                count++;
+            }
+            return count;
+        }
+
         internal static bool Close(Bezier4x3 a, Bezier4x3 b)
         {
             const float tolerance = 0.005f * 0.005f;
@@ -608,6 +665,11 @@ namespace ConditionalMedians2
         private readonly List<Piece> desired = new List<Piece>();
         private bool sweep = true;
         private bool saveSafe;
+
+        // Whether lines can be drawn: only when the game's save leaves out what
+        // the mod hides while it writes. A painted median has nothing else to
+        // draw, so the tool offers one only then.
+        internal bool CanDraw => saveSafe || (saveSafe = MedianLines.SaveSkipsDisabled(World));
         private bool warned;
         private uint frame;
 
@@ -706,8 +768,7 @@ namespace ConditionalMedians2
             // A save hides the lines only while it writes the city.
             if (!disabled.IsEmptyIgnoreFilter) EntityManager.RemoveComponent<Disabled>(disabled);
             if (sweep || (frame & 255u) == 0) Sweep();
-            if (!saveSafe) saveSafe = MedianLines.SaveSkipsDisabled(World);
-            if (!saveSafe)
+            if (!CanDraw)
             {
                 if (!warned)
                 {
@@ -887,7 +948,9 @@ namespace ConditionalMedians2
                     // bar's junction side, leaving the gap Curbside leaves behind it.
                     float start = MedianLines.Cut(curve, first[side], true);
                     float end = MedianLines.Cut(curve, second[side], false);
-                    if (MedianLines.Overlaps(EntityManager, Owned(node), curve)) state = "a line is already drawn there";
+                    // A painted median fills around a line the junction draws
+                    // itself; a divider's edge line is left to that line.
+                    if (!median.Painted && MedianLines.Overlaps(EntityManager, Owned(node), curve)) state = "a line is already drawn there";
                     else
                     {
                         // The stop-bar trims, then every marked crosswalk the line crosses.
@@ -910,6 +973,7 @@ namespace ConditionalMedians2
                             cut.Mouth = MedianLines.NearerMouth(curve, cut.From, cut.To, first[side], second[side]);
                             cuts[i] = cut;
                         }
+                        int around = median.Painted ? MedianLines.CutAtLines(EntityManager, Owned(node), curve, cuts) : 0;
                         AddPieces(curve, first[side].Prefab, second[side].Prefab);
                         float drawn = 0f;
                         foreach (var piece in desired) drawn += MathUtils.Length(piece.Curve);
@@ -919,7 +983,8 @@ namespace ConditionalMedians2
                             (first[side].Prefab != second[side].Prefab ? $" and {Name(second[side].Prefab)}" : "") +
                             $", {drawn:F1} m in {desired.Count} piece{(desired.Count > 1 ? "s" : "")}" +
                             (stops > 0 ? $", stopping at {stops} stop bar{(stops > 1 ? "s" : "")}" : "") +
-                            (crossed > 0 ? $", cut at {crossed} crosswalk{(crossed > 1 ? "s" : "")}" : "");
+                            (crossed > 0 ? $", cut at {crossed} crosswalk{(crossed > 1 ? "s" : "")}" : "") +
+                            (around > 0 ? $", around {around} line{(around > 1 ? "s" : "")} the junction draws itself" : "");
                     }
                     junction.Sources[4 + side * 2] = first[side].StopBar;
                     junction.Sources[4 + side * 2 + 1] = second[side].StopBar;
@@ -945,7 +1010,7 @@ namespace ConditionalMedians2
             if (text != junction.Report && !text.Contains("waiting"))
             {
                 junction.Report = text;
-                Mod.Log.Info($"Median edge lines at junction {node.Index}: {text}.");
+                Mod.Log.Info($"{(median.Painted ? "Painted median lines" : "Median edge lines")} at junction {node.Index}: {text}.");
                 if (why != null) Mod.Log.Info($"DIAG lines junction {node.Index}: {why}");
             }
         }
@@ -1033,21 +1098,8 @@ namespace ConditionalMedians2
         // crosswalk lies across the junction, much farther away.
         private const float StopToCrosswalk = 4f;
 
-        // A road's direction at the junction mouth, pointing away from the
-        // junction, from the road's drawn edges there. On a curved road this
-        // differs from its direction at the junction's center.
-        private bool Outward(Entity edge, Entity node, out float2 outward)
-        {
-            outward = default;
-            if (!EntityManager.TryGetComponent<Game.Net.Edge>(edge, out var ends) ||
-                !EntityManager.TryGetComponent<Game.Net.EdgeGeometry>(edge, out var shape)) return false;
-            float3 tangent = ends.m_Start == node
-                ? math.normalizesafe(MathUtils.StartTangent(shape.m_Start.m_Left)) + math.normalizesafe(MathUtils.StartTangent(shape.m_Start.m_Right))
-                : -math.normalizesafe(MathUtils.EndTangent(shape.m_End.m_Left)) - math.normalizesafe(MathUtils.EndTangent(shape.m_End.m_Right));
-            if (math.lengthsq(tangent.xz) < 0.0001f) return false;
-            outward = math.normalize(tangent.xz);
-            return true;
-        }
+        private bool Outward(Entity edge, Entity node, out float2 outward) =>
+            MedianLines.Outward(EntityManager, edge, node, out outward);
 
         // The direction of a road from the junction along the median's axis.
         private float Sign(Entity edge, MedianGeometry median)

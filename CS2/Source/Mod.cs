@@ -107,6 +107,12 @@ namespace ConditionalMedians2
             foreach (var node in entities)
             {
                 var saved = EntityManager.GetComponentData<ClosedMedian>(node);
+                // A painted median builds nothing: no closed bit, no road sections.
+                if (medians.IsPainted(node))
+                {
+                    if (medians.CanMark(node)) medians.Mark(node, false);
+                    continue;
+                }
                 medians.PrepareRoad(saved.FirstRoad);
                 medians.PrepareRoad(saved.SecondRoad);
                 medians.PrepareStems(node, saved);
@@ -298,10 +304,16 @@ namespace ConditionalMedians2
                         ? $"The road's own median does not fit here: {reason}."
                         : "The road's own median does not fit here.";
                 }
+                else if (confirmed.Contains(node) && view.HasGeometry && view.Geometry.Painted && !LinesCanDraw())
+                {
+                    view.State = JunctionState.NotDrawn;
+                    view.Title = "Closed to traffic, line not drawn";
+                    view.Detail = "This game version's save would keep the continued line, so it is not drawn. The turns across it stay removed.";
+                }
                 else if (confirmed.Contains(node))
                 {
                     view.State = JunctionState.Closed;
-                    view.Title = "Median closed";
+                    view.Title = view.HasGeometry && view.Geometry.Painted ? "Painted median closed" : "Median closed";
                 }
                 else
                 {
@@ -331,7 +343,8 @@ namespace ConditionalMedians2
                 return view;
             }
             view.State = JunctionState.Closable;
-            view.Title = "Median opening";
+            view.Title = geometry.Painted ? "Painted median" : "Median opening";
+            if (geometry.Painted) view.Detail = "Closing continues its paint through the junction and removes the turns across it.";
             return view;
         }
 
@@ -343,6 +356,7 @@ namespace ConditionalMedians2
             simulation = World.GetOrCreateSystemManaged<SimulationSystem>();
             placements = GetEntityQuery(ComponentType.ReadOnly<ClosedMedian>(), ComponentType.Exclude<Deleted>());
             oldPlacements = GetEntityQuery(ComponentType.ReadOnly<MedianPlacement>());
+            paintMarkingQuery = GetEntityQuery(MedianLines.MarkingQuery);
             cars = GetEntityQuery(ComponentType.ReadOnly<Game.Vehicles.Car>(), ComponentType.ReadOnly<Game.Objects.Transform>(),
                 ComponentType.Exclude<Deleted>(), ComponentType.Exclude<Game.Objects.TripSource>());
         }
@@ -416,9 +430,12 @@ namespace ConditionalMedians2
                 Mod.Log.Info($"Native median refused at junction {node.Index}: {turns}");
                 return;
             }
-            PrepareRoad(placement.FirstRoad);
-            PrepareRoad(placement.SecondRoad);
-            PrepareStems(node, placement);
+            if (!geometry.Painted)
+            {
+                PrepareRoad(placement.FirstRoad);
+                PrepareRoad(placement.SecondRoad);
+                PrepareStems(node, placement);
+            }
             // Traffic is cut at once; the median is drawn once the junction has drained.
             EntityManager.AddComponentData(node, placement);
             active[node] = geometry;
@@ -622,7 +639,7 @@ namespace ConditionalMedians2
                 arms[count++] = arm;
             }
 
-            if (count < 2) return Nothing("No road with a built-in median runs straight through this junction.");
+            if (count < 2) return TryPaintedLayout(node, edges, ref placement, out geometry);
             Arm first = arms[0];
             Arm second = arms[1];
             if (count == 3)
@@ -704,6 +721,287 @@ namespace ConditionalMedians2
                     any = true;
                 }
             return any;
+        }
+
+        // A painted median: a two-way road without a built divider runs straight
+        // through the junction, and its median is the paint between its two
+        // directions (a center line, or a painted strip). Its position is read
+        // from the road's own car lanes at the junction, between the innermost
+        // lane of each direction, so asymmetric roads and left-hand traffic
+        // work alike; its width is what those lanes leave between them. At a
+        // crossroads of two such roads the wider road is the one closed.
+        private bool TryPaintedLayout(Entity node, DynamicBuffer<ConnectedEdge> edges, ref ClosedMedian placement,
+            out MedianGeometry geometry)
+        {
+            geometry = default;
+            const string none = "No road with a median, built or painted, runs straight through this junction.";
+            // A new closure, not the refresh of a closure that already exists.
+            bool isNew = placement.FirstRoad == Entity.Null;
+            if (edges.Length < 3) return Nothing(none);
+            int count = 0;
+            var arms = new PaintedArm[4];
+            foreach (var connection in edges)
+            {
+                Entity edge = connection.m_Edge;
+                if (!EntityManager.HasComponent<Edge>(edge) || !EntityManager.HasComponent<Curve>(edge) ||
+                    !EntityManager.HasComponent<PrefabRef>(edge) || !EntityManager.HasComponent<Composition>(edge) ||
+                    !EntityManager.HasComponent<EdgeGeometry>(edge) || EntityManager.HasComponent<Deleted>(edge))
+                    return Refuse("The roads here are still being built.");
+                Entity prefab = EntityManager.GetComponentData<PrefabRef>(edge).m_Prefab;
+                var ends = EntityManager.GetComponentData<Edge>(edge);
+                var composition = EntityManager.GetComponentData<Composition>(edge);
+                if (!EntityManager.HasComponent<NetCompositionData>(composition.m_Edge)) return Refuse("The roads here are still being built.");
+                // A road with a built median is the raised case's; here it can only be a side street.
+                if (sections.CanClose(prefab, composition.m_Edge)) continue;
+                bool isStart = ends.m_Start == node;
+                var nodeComposition = isStart ? composition.m_StartNode : composition.m_EndNode;
+                if (!EntityManager.HasComponent<NetCompositionData>(nodeComposition)) return Refuse("The roads here are still being built.");
+                var flags = EntityManager.GetComponentData<NetCompositionData>(nodeComposition).m_Flags.m_General;
+                // Undivided roads meet everywhere, so what rules a painted
+                // median out here is shown quietly (grey, with the reason),
+                // not as a refusal.
+                if ((flags & CompositionFlags.General.Roundabout) != 0) return Nothing("This is a roundabout.");
+                if ((flags & CompositionFlags.General.LevelCrossing) != 0) return Nothing("A railway crosses this junction.");
+                if ((flags & CompositionFlags.General.DeadEnd) != 0) return Nothing("This is a road end, not a junction.");
+                var curve = EntityManager.GetComponentData<Curve>(edge).m_Bezier;
+                float3 tangent = math.normalizesafe(isStart ? curve.b - curve.a : curve.c - curve.d);
+                var arm = new PaintedArm
+                {
+                    Edge = edge,
+                    Prefab = prefab,
+                    Direction = math.normalizesafe(tangent.xz),
+                    Width = EntityManager.GetComponentData<NetCompositionData>(composition.m_Edge).m_Width
+                };
+                // The direction at the junction mouth, as the line continuation
+                // measures the approach; on a curve it differs from Direction,
+                // which is taken at the junction's center.
+                if (!MedianLines.Outward(EntityManager, edge, node, out arm.Outward) ||
+                    !PaintedCenter(edge, isStart, arm.Outward, out arm.Center, out arm.HalfWidth)) continue;
+                if ((flags & CompositionFlags.General.Tunnel) != 0) arm.Problem = "Junctions in tunnels are not supported.";
+                else if ((flags & CompositionFlags.General.Elevated) != 0) arm.Problem = "Elevated junctions are not supported.";
+                else if (math.abs(tangent.y) > 0.08f || math.lengthsq(tangent.xz) < 0.9f)
+                    arm.Problem = "The road is too steep at the junction (over about 8%).";
+                arms[count++] = arm;
+            }
+            if (count < 2) return Nothing(none);
+
+            // The closure's own pair, or else the pair that lines up; of two such
+            // pairs (a crossroads) the wider road, and none if they are as wide.
+            PaintedArm first = default, second = default;
+            int pairs = 0;
+            float best = -1f;
+            bool tie = false;
+            for (int i = 0; i < count; i++)
+                for (int j = i + 1; j < count; j++)
+                {
+                    if (placement.FirstRoad != Entity.Null)
+                    {
+                        if ((arms[i].Edge == placement.FirstRoad && arms[j].Edge == placement.SecondRoad) ||
+                            (arms[j].Edge == placement.FirstRoad && arms[i].Edge == placement.SecondRoad))
+                        {
+                            first = arms[i];
+                            second = arms[j];
+                            pairs = 1;
+                        }
+                        continue;
+                    }
+                    if (math.dot(arms[i].Direction, arms[j].Direction) > -0.98f) continue;
+                    pairs++;
+                    float width = math.min(arms[i].Width, arms[j].Width);
+                    if (width > best + 0.01f)
+                    {
+                        best = width;
+                        first = arms[i];
+                        second = arms[j];
+                        tie = false;
+                    }
+                    else if (width > best - 0.01f) tie = true;
+                }
+            if (pairs == 0)
+                return placement.FirstRoad != Entity.Null ? Refuse("The roads at this junction changed.") : Nothing(none);
+            if (tie)
+                return Nothing("Both roads at this crossroads have a painted median and the same width, so it is not clear which one to close.");
+            if (first.Problem != null) return Nothing(first.Problem);
+            if (second.Problem != null) return Nothing(second.Problem);
+            if (first.Prefab != second.Prefab) return Nothing("The two sides of the road are different road types.");
+            if (math.dot(first.Direction, second.Direction) > -0.98f)
+                return Nothing("The road bends at the junction (over about 11 degrees).");
+            float2 gap = first.Center.xz - second.Center.xz;
+            float gapLength = math.length(gap);
+            if (gapLength < 0.5f) return Nothing("The painted median has no opening here.");
+            if (math.abs(first.Center.y - second.Center.y) > 1f)
+                return Nothing("The two sides of the road differ in height by more than 1 m.");
+            var painted = new MedianGeometry
+            {
+                Painted = true,
+                Center = (first.Center + second.Center) * 0.5f,
+                Axis = gap / gapLength,
+                HalfWidth = math.max(first.HalfWidth, second.HalfWidth),
+                HalfLength = gapLength * 0.5f
+            };
+            // A new closure needs paint to continue: a line on the same side of
+            // the median on both approaches, as the continuation joins them. A
+            // closure that exists keeps going while a line is briefly hidden or
+            // rebuilt.
+            if (isNew && !HasPaintToContinue(first, second, painted))
+                return Nothing("This road has no center line or painted strip to continue through the junction.");
+            // The continued line is all a painted closure draws; where the line
+            // pass cannot run, a new one would only cut turns.
+            if (isNew && !LinesCanDraw())
+                return Nothing("Painted medians are off in this game version: its save would keep the continued lines.");
+            placement = new ClosedMedian { FirstRoad = first.Edge, SecondRoad = second.Edge };
+            geometry = painted;
+            return true;
+        }
+
+        private readonly MedianLines.Source[] paintFirst = new MedianLines.Source[2];
+        private readonly MedianLines.Source[] paintSecond = new MedianLines.Source[2];
+        private readonly bool[] paintHasFirst = new bool[2];
+        private readonly bool[] paintHasSecond = new bool[2];
+        private readonly List<Entity> paintFirstMarkings = new List<Entity>();
+        private readonly List<Entity> paintSecondMarkings = new List<Entity>();
+        // The markings an approach owns, read as the line continuation reads
+        // them: by owner, since a mod that draws its own lines (Curbside) gives
+        // them the road as owner without listing them among the road's lanes.
+        private EntityQuery paintMarkingQuery;
+        // The tool asks every frame it hovers a junction; the answer for the
+        // same two roads is kept for a few frames.
+        private const int PaintCheckFrames = 15;
+        private Entity paintCheckFirst, paintCheckSecond;
+        private int paintCheckFrame = int.MinValue;
+        private bool paintCheckResult;
+
+        private MedianLineSystem lineSystem;
+
+        private bool LinesCanDraw()
+        {
+            if (lineSystem == null) lineSystem = World.GetExistingSystemManaged<MedianLineSystem>();
+            return lineSystem == null || lineSystem.CanDraw;
+        }
+
+        private bool HasPaintToContinue(PaintedArm first, PaintedArm second, MedianGeometry painted)
+        {
+            int frame = UnityEngine.Time.frameCount;
+            if (first.Edge == paintCheckFirst && second.Edge == paintCheckSecond &&
+                frame - paintCheckFrame >= 0 && frame - paintCheckFrame < PaintCheckFrames) return paintCheckResult;
+            paintFirstMarkings.Clear();
+            paintSecondMarkings.Clear();
+            using (var entities = paintMarkingQuery.ToEntityArray(Allocator.Temp))
+            using (var owners = paintMarkingQuery.ToComponentDataArray<Owner>(Allocator.Temp))
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    if (owners[i].m_Owner == first.Edge) paintFirstMarkings.Add(entities[i]);
+                    else if (owners[i].m_Owner == second.Edge) paintSecondMarkings.Add(entities[i]);
+                }
+            bool result = PaintSources(first, painted, paintFirstMarkings, paintFirst, paintHasFirst) &&
+                PaintSources(second, painted, paintSecondMarkings, paintSecond, paintHasSecond) &&
+                ((paintHasFirst[0] && paintHasSecond[0]) || (paintHasFirst[1] && paintHasSecond[1]));
+            paintCheckFirst = first.Edge;
+            paintCheckSecond = second.Edge;
+            paintCheckFrame = frame;
+            paintCheckResult = result;
+            return result;
+        }
+
+        // The approach's center markings, found as the line continuation finds them.
+        private bool PaintSources(PaintedArm arm, MedianGeometry painted, List<Entity> markings,
+            MedianLines.Source[] found, bool[] has)
+        {
+            has[0] = has[1] = false;
+            if (!EntityManager.TryGetComponent<Curve>(arm.Edge, out var road)) return false;
+            float x = painted.Local(MathUtils.Position(road.m_Bezier, 0.5f)).x;
+            if (math.abs(x) < 0.5f) return false;
+            MedianLines.FindSources(EntityManager, markings, math.sign(x), arm.Outward, painted, found, has);
+            return true;
+        }
+
+        // Where a two-way road's two directions meet at its junction end: the
+        // point between the innermost car lane of each direction, and half the
+        // painted width between those lanes (at least 10 cm for a line). False
+        // for a one-way road, or one whose directions interleave.
+        private bool PaintedCenter(Entity edge, bool isStart, float2 outward, out float3 center, out float halfWidth)
+        {
+            center = default;
+            halfWidth = 0f;
+            if (!EntityManager.HasBuffer<SubLane>(edge)) return false;
+            var shape = EntityManager.GetComponentData<EdgeGeometry>(edge);
+            float3 left = isStart ? shape.m_Start.m_Left.a : shape.m_End.m_Left.d;
+            float3 right = isStart ? shape.m_Start.m_Right.a : shape.m_End.m_Right.d;
+            float3 middle = math.lerp(left, right, 0.5f);
+            float2 across = math.normalizesafe((right - left).xz);
+            float inLow = float.MaxValue, inHigh = float.MinValue, outLow = float.MaxValue, outHigh = float.MinValue;
+            float inLowWidth = 0f, inHighWidth = 0f, outLowWidth = 0f, outHighWidth = 0f;
+            foreach (var item in EntityManager.GetBuffer<SubLane>(edge, true))
+            {
+                Entity lane = item.m_SubLane;
+                if (!EntityManager.HasComponent<CarLane>(lane) || EntityManager.HasComponent<MasterLane>(lane) ||
+                    EntityManager.HasComponent<Deleted>(lane) || !EntityManager.TryGetComponent<Curve>(lane, out var laneCurve) ||
+                    !EntityManager.TryGetComponent<PrefabRef>(lane, out var lanePrefab) ||
+                    !EntityManager.TryGetComponent<CarLaneData>(lanePrefab.m_Prefab, out var carData) ||
+                    (carData.m_RoadTypes & RoadTypes.Car) == 0) continue;
+                var bezier = laneCurve.m_Bezier;
+                float3 end = math.distancesq(bezier.a.xz, middle.xz) < math.distancesq(bezier.d.xz, middle.xz) ? bezier.a : bezier.d;
+                // Only lanes that end at this junction: a long edge has a second
+                // set of lanes on its far half, ending at the edge's middle.
+                if (math.abs(math.dot(end.xz - middle.xz, outward)) > 1f) continue;
+                float lateral = math.dot(end.xz - middle.xz, across);
+                float width = EntityManager.TryGetComponent<NetLaneData>(lanePrefab.m_Prefab, out var laneData) ? laneData.m_Width : 3f;
+                bool incoming = math.dot((bezier.d - bezier.a).xz, outward) < 0f;
+                if (incoming)
+                {
+                    if (lateral < inLow) { inLow = lateral; inLowWidth = width; }
+                    if (lateral > inHigh) { inHigh = lateral; inHighWidth = width; }
+                }
+                else
+                {
+                    if (lateral < outLow) { outLow = lateral; outLowWidth = width; }
+                    if (lateral > outHigh) { outHigh = lateral; outHighWidth = width; }
+                }
+            }
+            if (inHigh == float.MinValue || outHigh == float.MinValue) return false;
+            float split, between, widths;
+            if (inHigh < outLow)
+            {
+                split = (inHigh + outLow) * 0.5f;
+                between = outLow - inHigh;
+                widths = (inHighWidth + outLowWidth) * 0.5f;
+            }
+            else if (outHigh < inLow)
+            {
+                split = (outHigh + inLow) * 0.5f;
+                between = inLow - outHigh;
+                widths = (outHighWidth + inLowWidth) * 0.5f;
+            }
+            else return false;
+            halfWidth = math.max(0.1f, (between - widths) * 0.5f);
+            center = middle + new float3(across.x, 0f, across.y) * split;
+            return true;
+        }
+
+        private struct PaintedArm
+        {
+            internal Entity Edge;
+            internal Entity Prefab;
+            internal float2 Direction;
+            internal float2 Outward;
+            internal float Width;
+            internal float3 Center;
+            internal float HalfWidth;
+            internal string Problem;
+        }
+
+        // Whether a closure's median is painted: its first road has no built
+        // divider. Read from the road's composition when it has one, else from
+        // its road type (on the frame a city loads, before compositions exist).
+        internal bool IsPainted(Entity node)
+        {
+            if (active.TryGetValue(node, out var known)) return known.Painted;
+            if (!EntityManager.TryGetComponent<ClosedMedian>(node, out var placement) ||
+                !EntityManager.TryGetComponent<PrefabRef>(placement.FirstRoad, out var prefab)) return false;
+            if (EntityManager.TryGetComponent<Composition>(placement.FirstRoad, out var composition) &&
+                composition.m_Edge != Entity.Null && EntityManager.HasBuffer<NetCompositionPiece>(composition.m_Edge))
+                return !sections.CanClose(prefab.m_Prefab, composition.m_Edge);
+            return !sections.HasDivider(prefab.m_Prefab);
         }
 
         private struct Arm
@@ -846,6 +1144,8 @@ namespace ConditionalMedians2
         internal void Mark(Entity node, bool closed, bool refreshGeometry = false)
         {
             if (!CanMark(node)) return;
+            // A painted median has no closed variant: its junction keeps the open bit.
+            if (closed && active.TryGetValue(node, out var known) && known.Painted) closed = false;
             var upgrade = EntityManager.HasComponent<Upgraded>(node)
                 ? EntityManager.GetComponentData<Upgraded>(node) : default;
             var current = upgrade.m_Flags.m_General;
@@ -1013,13 +1313,33 @@ namespace ConditionalMedians2
                 if (!TryLayout(node, ref placement, out var geometry))
                 {
                     Mod.Log.Info($"Closed median released at junction {node.Index}: its two approaches no longer " +
-                        "share a supported built-in divider.");
+                        "share a supported median (built or painted).");
                     DiagnoseLayout(node, "closure released");
                     expired.Add(node);
                     continue;
                 }
+                // A closure keeps its kind: one whose roads were replaced so that
+                // a built median became paint, or paint a built median, is
+                // released, as its turns and drawing were checked for the other.
+                if (active.TryGetValue(node, out var previous) && previous.Painted != geometry.Painted)
+                {
+                    Mod.Log.Info($"Closed median released at junction {node.Index}: its roads changed from a " +
+                        $"{(previous.Painted ? "painted" : "built")} to a {(geometry.Painted ? "painted" : "built")} median.");
+                    expired.Add(node);
+                    continue;
+                }
                 active[node] = geometry;
-                if (CanRenderMedian(node) && HasClosedComposition(placement.FirstRoad, node) && HasClosedComposition(placement.SecondRoad, node) &&
+                if (geometry.Painted)
+                {
+                    // Nothing is built for paint: closed once the junction has drained.
+                    if (!draining.ContainsKey(node) && confirmed.Add(node))
+                    {
+                        if (node == lastToggled) status = "Painted median closed.";
+                        Mod.Log.Info($"Painted median closed at junction {node.Index}: {geometry.HalfLength * 2f:F1} m across the junction, " +
+                            $"{geometry.HalfWidth * 2f:F2} m of paint between the directions.");
+                    }
+                }
+                else if (CanRenderMedian(node) && HasClosedComposition(placement.FirstRoad, node) && HasClosedComposition(placement.SecondRoad, node) &&
                     confirmed.Add(node))
                 {
                     if (node == lastToggled) status = "Median closed.";
