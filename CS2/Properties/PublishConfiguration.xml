@@ -18,7 +18,7 @@ On a road with a painted center line instead of a built median, closing the junc
 - Reopening gives the junction back as it was.
 
 **How to use**
-1. Forbid every movement across the median or center line first: the turns in and out across it and, at a crossroads, straight ahead from the side streets. Use the game's turn signs or Traffic's lane connector. The tool draws the movements still allowed in red. Rules made with Traffic's lane connector last only while Traffic is loaded, and a road upgrade can reset them; the game's turn signs need no other mod.
+1. Forbid every movement across the median or center line first: the turns in and out across it (left turns with right-hand traffic, right turns with left-hand traffic) and, at a crossroads, straight ahead from the side streets. Use the game's turn signs or Traffic's lane connector. The tool draws the movements still allowed in red. Rules made with Traffic's lane connector last only while Traffic is loaded, and a road upgrade can reset them; the game's turn signs need no other mod.
 2. Click the round blue median button in the top-left row of mod buttons, or press F8.
 3. Point at a junction. Blue: it can be closed. Orange: it is closed (click to reopen). Red: it cannot be closed yet, and the panel says why. Grey: there is nothing to close, or a painted road there does not qualify (the panel says why). Left-click to close or reopen; right-click or F8 leaves the tool.
 
@@ -27,7 +27,9 @@ A newly closed median is drawn once the vehicles already in a crossing turn have
 **Supported**
 - Junctions where the two approaches of the divided road use the same road type and the same physical divider, including gently curved roads and the game's grass upgrade.
 - Two-way roads with a painted center line, single or double, the game's own or The Curbside Mod's, at T-junctions and crossroads, where both sides of the junction are the same road type. Where two painted roads cross, only the wider one can be closed; if it does not qualify, the junction cannot be closed.
-- Tested with Traffic, Traffic Tool Essentials, Road Builder, Driveway Entries and The Curbside Mod loaded, and with this mod alone. Painted medians were tested with The Curbside Mod's double center line and, without it, with the game's own single center line.
+- A painted strip between the directions with a line along each edge, for example a Road Builder road with an empty lane in the middle and The Curbside Mod's lines along it. Without The Curbside Mod the game draws one center line in a strip up to about 1.5 m wide and no line along a wider one, so a wider strip cannot be closed.
+- Right-hand and left-hand traffic.
+- Tested with Traffic, Traffic Tool Essentials, Road Builder, Driveway Entries and The Curbside Mod loaded, and with this mod alone. Painted medians were tested with The Curbside Mod's double center line, the game's own single center line without The Curbside Mod, a Road Builder road, a 2 m painted strip built with Road Builder (with The Curbside Mod's lines along it), a curve of about 40 m radius and a crossroads. Built and painted medians were both tested with left-hand traffic.
 
 **Not supported**
 - Roundabouts, level crossings, tram or train tracks, paths joining the junction, tunnels, elevated roads and middle platforms.
@@ -47,8 +49,8 @@ A newly closed median is drawn once the vehicles already in a crossing turn have
 - Where the road's own median does not fit between the through lanes, for example where the two approaches are sharply offset, the junction stays closed to traffic but keeps its regular road surface. The tool's panel says why.
 - If a turn across a closed median is allowed again (for example after Traffic is removed, or after a road upgrade resets Traffic's lane connections), the mod still keeps that turn out of the route network, but the median is not drawn and the panel shows "Closed to traffic, median not drawn". On a painted median the line stays drawn and the panel still says "Painted median closed". Forbid the turn again, preferably with the game's turn signs.
 - A closed painted median stays closed to traffic if its center line is removed later or both sides of the road are replaced by a type without one. Nothing is drawn across the junction then, but the panel still says "Painted median closed"; reopen it with the tool.
-- Road Builder roads: at the one Road Builder junction tried, the median did not fit between the lanes, so it is closed to traffic but its median is not drawn.
-- Not tested yet: left-hand traffic, medians wider than 5 m, the tree upgrade, a divided side street that leaves as a bridge, The Curbside Mod's invisible crosswalks, and, for painted medians, a painted strip wider than a line, Road Builder roads with a painted center line, and replacing a closed junction's road with the other kind.
+- Road Builder roads: at the one divided Road Builder junction tried, the median did not fit between the lanes, so it is closed to traffic but its median is not drawn. Both sides of a junction must be the same Road Builder road: a segment changed on its own in Road Builder becomes a road type of its own, and the panel then says the two sides are different road types. Place the road with Road Builder's Place More instead.
+- Not tested yet: medians wider than 5 m, the tree upgrade, a divided side street that leaves as a bridge, The Curbside Mod's invisible crosswalks, and painted strips wider than 2 m.
 
 Built for game version 1.6.4f1.
 
@@ -63,10 +65,10 @@ Source code for this release is available on [GitHub](https://github.com/dexter-
 	<Tag Value="Code Mod" />
 	<ForumLink Value="" />
 	<!--Keep in step with CS2\UI\mod.json and CS2\Source\AssemblyInfo.cs.-->
-	<ModVersion Value="2.2.0" />
+	<ModVersion Value="2.2.1" />
 	<GameVersion Value="1.6.*" />
 	<!--Publish ignores ChangeLog; NewVersion and Update require it. Write this version's changes before each NewVersion.-->
-	<ChangeLog Value="Painted medians: on a two-way road with a painted center line, closing a junction now continues the line through it and removes the turns across it, at T-junctions and crossroads, with the game's own lines or The Curbside Mod's. A closure on Road Builder roads now stays closed to traffic while Road Builder is missing, instead of being released." />
+	<ChangeLog Value="Painted strips: the lines along a painted strip between the directions are now found with more room to spare, so a strip whose lines sit a little further into the lanes is not refused. Tested with left-hand traffic, Road Builder roads, a 2 m painted strip, and replacing a closed junction's road with the other kind." />
 	<ExternalLink Type="GitHub" Url="https://github.com/dexter-adams/conditional-medians" />
 	<!--AI disclosure (ModPublisher in game 1.6.4): a free-text Disclosure of at most 1000 characters, which
 	    publish.ps1 requires before the first Publish. AiTag elements are matched against the AI-disclosure
