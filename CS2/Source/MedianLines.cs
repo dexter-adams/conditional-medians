@@ -138,8 +138,11 @@ namespace ConditionalMedians2
         // own road, which may meet the median's axis at an angle.
         // A painted median's own lines lie on or beside its axis: a center line
         // (single, or double drawn as one marking) on it, or a pair of lines a
-        // little either side, within the paint's half width plus this.
-        private const float CenterReach = 0.4f;
+        // little either side, within the paint's half width plus this. Curbside
+        // draws the edge lines of a painted strip inside the lanes, 0.35 m past
+        // the strip's edge by default; the next lines out, between lanes of one
+        // direction, lie a whole lane width further.
+        private const float CenterReach = 0.75f;
         private const float CenterTolerance = 0.08f;
 
         internal static void FindSources(EntityManager entities, List<Entity> lanes, float sign, float2 outward,
