@@ -1,0 +1,105 @@
+// The game's components (floating Button, Panel, Tooltip) give the native blue
+// look; these rules only lay out the panel's content, after Driveway Entries.
+.toggle {
+  color: #ffffff;
+
+  .icon {
+    width: 68%;
+    height: 68%;
+    fill: #ffffff;
+  }
+}
+
+// Placed by the Panel's initialPosition; the width is ours.
+.panel {
+  width: 400rem;
+}
+
+.content {
+  padding: 16rem;
+}
+
+.intro {
+  font-size: 13rem;
+  opacity: 0.85;
+}
+
+.label {
+  margin: 14rem 0 6rem;
+  font-size: 12rem;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.junction {
+  padding: 10rem 12rem;
+  border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.titleRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+// A dot in the colour of the outline the tool draws on the junction.
+.marker {
+  width: 12rem;
+  height: 12rem;
+  margin-right: 8rem;
+  border-radius: 6rem;
+  flex-shrink: 0;
+}
+
+.toneClose {
+  background-color: rgb(64, 217, 255);
+}
+
+.toneReopen {
+  background-color: rgb(255, 179, 51);
+}
+
+.toneRefused {
+  background-color: rgb(255, 77, 51);
+}
+
+.toneNeutral {
+  background-color: rgb(190, 200, 215);
+}
+
+.title {
+  font-size: 15rem;
+  font-weight: bold;
+}
+
+.detail {
+  margin-top: 6rem;
+  font-size: 13rem;
+  opacity: 0.85;
+}
+
+.hint {
+  margin-top: 8rem;
+  font-size: 13rem;
+  color: rgb(120, 190, 255);
+}
+
+.idle {
+  padding: 10rem 12rem;
+  border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.04);
+  font-size: 13rem;
+  opacity: 0.7;
+}
+
+.status {
+  font-size: 13rem;
+  opacity: 0.85;
+}
+
+.footer {
+  margin-top: 14rem;
+  font-size: 12rem;
+  opacity: 0.7;
+}
