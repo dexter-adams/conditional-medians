@@ -1,0 +1,73 @@
+<Publish>
+	<!--Printed by the first Publish (2026-11-21); required for NewVersion and Update.-->
+	<ModId Value="168662" />
+	<DisplayName Value="Conditional Medians" />
+	<ShortDescription Value="Close the opening in a divided road's median at a junction: the median runs through, crossing turns are removed and the crosswalks stay." />
+	<LongDescription>
+Close the opening in a divided road's built-in median at a junction, so a side street can only turn in and out on its own side (right-in, right-out with right-hand traffic). The junction keeps the road's own median, curbs and crosswalks, and vehicles can no longer cross it.
+
+**What it does**
+- Draws the road's own median through the junction, with its curbs and surface.
+- Takes every car turn that crosses the closed median out of the route network. The game's turn signs only make a turn more expensive, so vehicles would otherwise still take it now and then. Vehicles planning such a turn find another route; a vehicle already in the turn finishes it.
+- Keeps the crosswalks across the divided road, one on each carriageway, ending at the median. With traffic lights, pedestrians keep their crossing phase.
+- Continues the lines beside the median through the junction in the same colour and style, where the approaches have them (The Curbside Mod draws them).
+- At a T-junction whose side street is a divided road too, the through road's median closes and the side street keeps its own median end.
+- Reopening gives the junction back as it was.
+
+**How to use**
+1. Forbid every movement across the median first: the turns in and out across it and, at a crossroads, straight ahead from the side streets. Use the game's turn signs or Traffic's lane connector. The tool draws the movements still allowed in red. Rules made with Traffic's lane connector last only while Traffic is loaded, and a road upgrade can reset them; the game's turn signs need no other mod.
+2. Click the round blue median button in the top-left row of mod buttons, or press F8.
+3. Point at a junction. Blue: it can be closed. Orange: it is closed (click to reopen). Red: it cannot be closed yet, and the panel says why. Left-click to close or reopen; right-click or F8 leaves the tool.
+
+A newly closed median is drawn once the vehicles already in a crossing turn have left the junction (at most about 30 seconds of game time).
+
+**Supported**
+- Junctions where the two approaches of the divided road use the same road type and the same physical divider, including gently curved roads and the game's grass upgrade.
+- Tested with Traffic, Traffic Tool Essentials, Road Builder, Driveway Entries and The Curbside Mod loaded, and with this mod alone.
+
+**Not supported**
+- Painted center lines, roundabouts, level crossings, tram or train tracks, paths joining the junction, tunnels, elevated roads and middle platforms.
+- Crossroads where both roads are divided, and junctions where more than four roads meet.
+- A divided road that bends more than about 11 degrees or is steeper than about 8% at the junction, roads with two medians, and median ends more than 1 m apart in height.
+
+**Saves**
+- Closures are saved with the city.
+- Changing the roads at a closed junction so that it no longer qualifies (for example building a divided road on its fourth arm) reopens it. Close it again once it qualifies.
+- A new undivided road on the fourth arm of a closed T keeps the closure, but the median is not drawn until that road's movements across the median are forbidden.
+- A closure on roads that another mod provides, such as Road Builder, is released when the city is loaded without that mod. If the city is saved then, that junction stays open when the mod is back; loading the earlier save restores it.
+- Removing this mod is safe: the city loads and the closed junctions are ordinary open junctions again. A city saved while the mod was removed keeps those junctions open when the mod is back. Bus lines that were re-routed around a closed median keep that route until the line is edited.
+- The removed turns are not saved; the game rebuilds its route network on every load and the mod removes them again.
+
+**Known limits**
+- Where the road's own median does not fit between the through lanes, for example where the two approaches are sharply offset, the junction stays closed to traffic but keeps its regular road surface. The tool's panel says why.
+- If a turn across a closed median is allowed again (for example after Traffic is removed, or after a road upgrade resets Traffic's lane connections), the mod still keeps that turn out of the route network, but the median is not drawn and the panel shows "Closed to traffic, median not drawn". Forbid the turn again, preferably with the game's turn signs.
+- Road Builder roads: at the one Road Builder junction tried, the median did not fit between the lanes, so it is closed to traffic but its median is not drawn.
+- Not tested yet: left-hand traffic, medians wider than 5 m, the tree upgrade, a divided side street that leaves as a bridge, and The Curbside Mod's invisible crosswalks.
+
+Built for game version 1.6.4f1.
+
+Source code for this release is available on [GitHub](https://github.com/dexter-adams/conditional-medians).
+	</LongDescription>
+	<Thumbnail Value="Properties/Screenshots/conditional-medians-featured.jpg" />
+	<Screenshot Value="Properties/Screenshots/01-before-after.jpg" />
+	<Screenshot Value="Properties/Screenshots/02-downtown.jpg" />
+	<Screenshot Value="Properties/Screenshots/03-tool-open.jpg" />
+	<Screenshot Value="Properties/Screenshots/04-tool-closed.jpg" />
+	<Screenshot Value="Properties/Screenshots/05-tool-blocked.jpg" />
+	<Tag Value="Code Mod" />
+	<ForumLink Value="" />
+	<!--Keep in step with CS2\UI\mod.json and CS2\Source\AssemblyInfo.cs.-->
+	<ModVersion Value="2.1.0" />
+	<GameVersion Value="1.6.*" />
+	<!--Publish ignores ChangeLog; NewVersion and Update require it. Write this version's changes before each NewVersion.-->
+	<ChangeLog Value="Added a link to the source code on GitHub." />
+	<ExternalLink Type="GitHub" Url="https://github.com/dexter-adams/conditional-medians" />
+	<!--AI disclosure (ModPublisher in game 1.6.4): a free-text Disclosure of at most 1000 characters, which
+	    publish.ps1 requires before the first Publish. AiTag elements are matched against the AI-disclosure
+	    tags Paradox Mods lists at publish time; on 2026-11-21 it listed none for this game, so any AiTag
+	    stops the publish. Leave AiTag commented out unless Paradox adds tags.-->
+	<!--<AiTag Value="" />-->
+	<!--Sent blank on purpose: ModPublisher sends an empty Disclosure as "", which clears the page's
+	    disclosure; without this element an Update would keep the old one.-->
+	<Disclosure Value="" />
+</Publish>
