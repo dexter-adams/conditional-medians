@@ -140,9 +140,11 @@ namespace ConditionalMedians2
         // (single, or double drawn as one marking) on it, or a pair of lines a
         // little either side, within the paint's half width plus this. Curbside
         // draws the edge lines of a painted strip inside the lanes, 0.35 m past
-        // the strip's edge by default; the next lines out, between lanes of one
-        // direction, lie a whole lane width further.
-        private const float CenterReach = 0.75f;
+        // the strip's edge by default and at most 1.5 m (its setting's range),
+        // plus the 0.3 m a line may drift 3 m back on a curve (the parallel
+        // test); the next lines out, between lanes of one direction, lie a
+        // whole lane width (3 m or more) past the strip's edge.
+        private const float CenterReach = 1.8f;
         private const float CenterTolerance = 0.08f;
 
         internal static void FindSources(EntityManager entities, List<Entity> lanes, float sign, float2 outward,

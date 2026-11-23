@@ -44,11 +44,24 @@ namespace ConditionalMedians2
                 if ((EntityManager.GetComponentData<Upgraded>(node).m_Flags.m_General & NativeSections.Closed) == 0) continue;
                 var placement = EntityManager.GetComponentData<ClosedMedian>(node);
                 using (var edges = EntityManager.GetBuffer<ConnectedEdge>(node, true).ToNativeArray(Allocator.Temp))
-                foreach (var item in edges)
                 {
-                    Entity edge = item.m_Edge;
-                    if (edge == placement.FirstRoad || edge == placement.SecondRoad) continue;
-                    MarkStem(node, edge);
+                    // While a through road is being replaced (a road built onto it
+                    // splits it), its new segment is not yet the closure's: it is
+                    // no side street, and is left alone until the closure has
+                    // followed it.
+                    bool first = false, second = false;
+                    foreach (var item in edges)
+                    {
+                        first |= item.m_Edge == placement.FirstRoad;
+                        second |= item.m_Edge == placement.SecondRoad;
+                    }
+                    if (!first || !second) continue;
+                    foreach (var item in edges)
+                    {
+                        Entity edge = item.m_Edge;
+                        if (edge == placement.FirstRoad || edge == placement.SecondRoad) continue;
+                        MarkStem(node, edge);
+                    }
                 }
             }
         }

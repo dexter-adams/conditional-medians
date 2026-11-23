@@ -41,6 +41,15 @@ namespace ConditionalMedians2
                 (piece.m_PieceFlags & BlockerMask) == Divider && piece.m_Size.x > 0.1f;
         }
 
+        // A raised piece on the road that stops traffic, closable or not: the
+        // median of a road the mod can close, but also each of two medians
+        // side by side, or a platform in the middle.
+        internal static bool IsRaisedBlocker(NetCompositionPiece piece)
+        {
+            return (piece.m_PieceFlags & NetPieceFlags.BlockTraffic) != 0 && piece.m_Size.x > 0.1f &&
+                (piece.m_SectionFlags & (NetSectionFlags.Underground | NetSectionFlags.Overhead | NetSectionFlags.Hidden)) == 0;
+        }
+
         internal bool CanClose(Entity prefab, Entity composition)
         {
             if (!manager.HasBuffer<NetGeometrySection>(prefab) ||

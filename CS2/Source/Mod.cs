@@ -527,7 +527,11 @@ namespace ConditionalMedians2
                 hasRoadLane = true;
                 if ((flags & (CarLaneFlags.Forbidden | CarLaneFlags.Unsafe)) != 0) continue;
                 var curve = EntityManager.GetComponentData<Curve>(lane).m_Bezier;
-                if (!geometry.Hits(curve)) continue;
+                // A built divider blocks any lane that would run over it. Paint
+                // only stops the turns that cross its line, the lanes the
+                // closure cuts (MedianLaneBlock): a lane that only runs over a
+                // wide painted strip without crossing its middle is left alone.
+                if (!(geometry.Painted ? geometry.CrossesGap(curve) : geometry.Hits(curve))) continue;
                 crossing++;
                 crossings?.Add(curve);
                 if (log)
@@ -547,11 +551,20 @@ namespace ConditionalMedians2
         // and whether there was simply nothing to close.
         private string layoutRefusal;
         private bool layoutNeutral;
+        // Whether the last refusal was only a road at the junction caught
+        // mid-rebuild (a road being replaced or split this frame).
+        private bool layoutBuilding;
+        // Set while a closure whose road was split picks its new pair: it reads
+        // the junction as a new closure would, but it already exists.
+        private bool followingSplit;
+        // Why the last attempt to follow a split failed, for the release log.
+        private string followRefusal;
 
         private bool Refuse(string reason)
         {
             layoutRefusal = reason;
             layoutNeutral = false;
+            layoutBuilding = false;
             return false;
         }
 
@@ -559,6 +572,14 @@ namespace ConditionalMedians2
         {
             layoutRefusal = reason;
             layoutNeutral = true;
+            layoutBuilding = false;
+            return false;
+        }
+
+        private bool Building()
+        {
+            Refuse("The roads here are still being built.");
+            layoutBuilding = true;
             return false;
         }
 
@@ -574,8 +595,14 @@ namespace ConditionalMedians2
         {
             geometry = default;
             layoutRefusal = null;
+            layoutBuilding = false;
             if (!CanMark(node)) return Refuse("That junction is gone.");
             var edges = EntityManager.GetBuffer<ConnectedEdge>(node, true);
+            // A road replaced this frame (split by a road built onto it, or
+            // removed) is still listed beside its replacement until the game's
+            // references catch up: the junction is read once it has settled.
+            foreach (var connection in edges)
+                if (EntityManager.HasComponent<Deleted>(connection.m_Edge)) return Building();
             if (edges.Length < 2) return Nothing("This is a road end, not a junction.");
             if (edges.Length > 4) return Refuse("More than four roads meet here.");
 
@@ -586,18 +613,18 @@ namespace ConditionalMedians2
                 Entity edge = connection.m_Edge;
                 if (!EntityManager.HasComponent<Edge>(edge) || !EntityManager.HasComponent<Curve>(edge) ||
                     !EntityManager.HasComponent<PrefabRef>(edge) || !EntityManager.HasComponent<Composition>(edge) ||
-                    EntityManager.HasComponent<Deleted>(edge)) return Refuse("The roads here are still being built.");
+                    EntityManager.HasComponent<Deleted>(edge)) return Building();
                 Entity prefab = EntityManager.GetComponentData<PrefabRef>(edge).m_Prefab;
                 if (!EntityManager.HasComponent<RoadData>(prefab)) return Refuse("A path or track joins this junction.");
                 var ends = EntityManager.GetComponentData<Edge>(edge);
                 var composition = EntityManager.GetComponentData<Composition>(edge);
-                if (!EntityManager.HasComponent<NetCompositionData>(composition.m_Edge)) return Refuse("The roads here are still being built.");
+                if (!EntityManager.HasComponent<NetCompositionData>(composition.m_Edge)) return Building();
                 var road = EntityManager.GetComponentData<NetCompositionData>(composition.m_Edge);
                 if (!sections.CanClose(prefab, composition.m_Edge)) continue;
-                if (!EntityManager.HasComponent<EdgeGeometry>(edge)) return Refuse("The roads here are still being built.");
+                if (!EntityManager.HasComponent<EdgeGeometry>(edge)) return Building();
 
                 var nodeComposition = ends.m_Start == node ? composition.m_StartNode : composition.m_EndNode;
-                if (!EntityManager.HasComponent<NetCompositionData>(nodeComposition)) return Refuse("The roads here are still being built.");
+                if (!EntityManager.HasComponent<NetCompositionData>(nodeComposition)) return Building();
                 var flags = EntityManager.GetComponentData<NetCompositionData>(nodeComposition).m_Flags.m_General;
                 // The junction's own kind refuses it whichever road reports it.
                 if ((flags & CompositionFlags.General.Roundabout) != 0) return Refuse("This is a roundabout.");
@@ -737,25 +764,43 @@ namespace ConditionalMedians2
             const string none = "No road with a median, built or painted, runs straight through this junction.";
             // A new closure, not the refresh of a closure that already exists.
             bool isNew = placement.FirstRoad == Entity.Null;
+            // A closure following its split road picks its pair as a new one
+            // would, but it exists: the new segment's lines may not be drawn yet
+            // (its markings get their render data a frame or more later).
+            bool checkNew = isNew && !followingSplit;
             if (edges.Length < 3) return Nothing(none);
             int count = 0;
             var arms = new PaintedArm[4];
+            // Why a road here with a raised median of its own is not one this
+            // mod closes, if no painted road is found instead.
+            string raised = null;
             foreach (var connection in edges)
             {
                 Entity edge = connection.m_Edge;
                 if (!EntityManager.HasComponent<Edge>(edge) || !EntityManager.HasComponent<Curve>(edge) ||
                     !EntityManager.HasComponent<PrefabRef>(edge) || !EntityManager.HasComponent<Composition>(edge) ||
                     !EntityManager.HasComponent<EdgeGeometry>(edge) || EntityManager.HasComponent<Deleted>(edge))
-                    return Refuse("The roads here are still being built.");
+                    return Building();
                 Entity prefab = EntityManager.GetComponentData<PrefabRef>(edge).m_Prefab;
                 var ends = EntityManager.GetComponentData<Edge>(edge);
                 var composition = EntityManager.GetComponentData<Composition>(edge);
-                if (!EntityManager.HasComponent<NetCompositionData>(composition.m_Edge)) return Refuse("The roads here are still being built.");
+                if (!EntityManager.HasComponent<NetCompositionData>(composition.m_Edge)) return Building();
                 // A road with a built median is the raised case's; here it can only be a side street.
                 if (sections.CanClose(prefab, composition.m_Edge)) continue;
+                // Nor is a road with a raised divider the mod cannot close (two
+                // medians side by side, a platform) painted, whatever lines it has.
+                int blockers = 0;
+                foreach (var piece in EntityManager.GetBuffer<NetCompositionPiece>(composition.m_Edge, true))
+                    if (NativeSections.IsRaisedBlocker(piece)) blockers++;
+                if (blockers > 0)
+                {
+                    raised = raised ?? (blockers > 1 ? "The road has more than one median."
+                        : "The road's median is not one this mod can close.");
+                    continue;
+                }
                 bool isStart = ends.m_Start == node;
                 var nodeComposition = isStart ? composition.m_StartNode : composition.m_EndNode;
-                if (!EntityManager.HasComponent<NetCompositionData>(nodeComposition)) return Refuse("The roads here are still being built.");
+                if (!EntityManager.HasComponent<NetCompositionData>(nodeComposition)) return Building();
                 var flags = EntityManager.GetComponentData<NetCompositionData>(nodeComposition).m_Flags.m_General;
                 // Undivided roads meet everywhere, so what rules a painted
                 // median out here is shown quietly (grey, with the reason),
@@ -783,7 +828,7 @@ namespace ConditionalMedians2
                     arm.Problem = "The road is too steep at the junction (over about 8%).";
                 arms[count++] = arm;
             }
-            if (count < 2) return Nothing(none);
+            if (count < 2) return Nothing(raised ?? none);
 
             // The closure's own pair, or else the pair that lines up; of two such
             // pairs (a crossroads) the wider road, and none if they are as wide.
@@ -818,7 +863,7 @@ namespace ConditionalMedians2
                     else if (width > best - 0.01f) tie = true;
                 }
             if (pairs == 0)
-                return placement.FirstRoad != Entity.Null ? Refuse("The roads at this junction changed.") : Nothing(none);
+                return placement.FirstRoad != Entity.Null ? Refuse("The roads at this junction changed.") : Nothing(raised ?? none);
             if (tie)
                 return Nothing("Both roads at this crossroads have a painted median and the same width, so it is not clear which one to close.");
             if (first.Problem != null) return Nothing(first.Problem);
@@ -843,11 +888,11 @@ namespace ConditionalMedians2
             // the median on both approaches, as the continuation joins them. A
             // closure that exists keeps going while a line is briefly hidden or
             // rebuilt.
-            if (isNew && !HasPaintToContinue(first, second, painted))
+            if (checkNew && !HasPaintToContinue(first, second, painted))
                 return Nothing("This road has no center line or painted strip to continue through the junction.");
             // The continued line is all a painted closure draws; where the line
             // pass cannot run, a new one would only cut turns.
-            if (isNew && !LinesCanDraw())
+            if (checkNew && !LinesCanDraw())
                 return Nothing("Painted medians are off in this game version: its save would keep the continued lines.");
             placement = new ClosedMedian { FirstRoad = first.Edge, SecondRoad = second.Edge };
             geometry = painted;
@@ -1312,12 +1357,37 @@ namespace ConditionalMedians2
                 var placement = EntityManager.GetComponentData<ClosedMedian>(node);
                 if (!TryLayout(node, ref placement, out var geometry))
                 {
-                    Mod.Log.Info($"Closed median released at junction {node.Index}: its two approaches no longer " +
-                        "share a supported median (built or painted).");
-                    DiagnoseLayout(node, "closure released");
-                    expired.Add(node);
-                    continue;
+                    // A road here caught mid-rebuild (replaced, or split by a road
+                    // built onto it): the closure waits for it to settle.
+                    if (layoutBuilding && StillRebuilding(node)) continue;
+                    string reason = layoutRefusal;
+                    if (TryFollowSplit(node, placement, out var followed, out geometry))
+                    {
+                        Mod.Log.Info($"Closed median at junction {node.Index} follows its road, which was split: " +
+                            $"approaches {followed.FirstRoad.Index} and {followed.SecondRoad.Index} " +
+                            $"(were {placement.FirstRoad.Index} and {placement.SecondRoad.Index}).");
+                        EntityManager.SetComponentData(node, followed);
+                        placement = followed;
+                        // The game picks the through roads' junction ends again,
+                        // now as the closure's: a new segment taken for a side
+                        // street meanwhile loses that side street's median end.
+                        foreach (var road in new[] { followed.FirstRoad, followed.SecondRoad, node })
+                            if (!EntityManager.HasComponent<Updated>(road)) EntityManager.AddComponent<Updated>(road);
+                        // And the median is fitted again on the new segment.
+                        RefreshJunction(node);
+                    }
+                    else if (layoutBuilding && StillRebuilding(node)) continue;
+                    else
+                    {
+                        Mod.Log.Info($"Closed median released at junction {node.Index}: its two approaches no longer " +
+                            $"share a supported median (built or painted): {reason}" +
+                            (followRefusal != null ? $" Following the split road failed: {followRefusal}" : ""));
+                        DiagnoseLayout(node, "closure released");
+                        expired.Add(node);
+                        continue;
+                    }
                 }
+                rebuilding.Remove(node);
                 // A closure keeps its kind: one whose roads were replaced so that
                 // a built median became paint, or paint a built median, is
                 // released, as its turns and drawing were checked for the other.
@@ -1354,6 +1424,7 @@ namespace ConditionalMedians2
             foreach (var node in expired)
             {
                 active.Remove(node);
+                rebuilding.Remove(node);
                 confirmed.Remove(node);
                 loadRefreshes.Remove(node);
                 rechecks.Remove(node);
@@ -1367,8 +1438,66 @@ namespace ConditionalMedians2
             }
         }
 
+        // Frames a closure has waited for a road at its junction to finish
+        // being rebuilt. A split or a replacement settles within a frame or
+        // two; a closure still waiting after this many is released.
+        private readonly Dictionary<Entity, int> rebuilding = new Dictionary<Entity, int>();
+        private const int RebuildFrames = 60;
+
+        private bool StillRebuilding(Entity node)
+        {
+            rebuilding.TryGetValue(node, out int frames);
+            if (frames >= RebuildFrames) return false;
+            rebuilding[node] = frames + 1;
+            return true;
+        }
+
+        // A road built onto one of a closure's approaches (a side street or a
+        // node further along) splits it: the game deletes that segment and
+        // gives the junction a new one in its place. The closure follows when
+        // the junction, read as new, still has its through road along every
+        // saved approach that is still here, and at least one of them is.
+        private bool TryFollowSplit(Entity node, ClosedMedian saved, out ClosedMedian followed, out MedianGeometry geometry)
+        {
+            followed = default;
+            geometry = default;
+            followRefusal = null;
+            bool firstHere = IsConnected(node, saved.FirstRoad);
+            bool secondHere = IsConnected(node, saved.SecondRoad);
+            if (firstHere == secondHere) return false;
+            Entity kept = firstHere ? saved.FirstRoad : saved.SecondRoad;
+            ClosedMedian fresh = default;
+            followingSplit = true;
+            try
+            {
+                if (!TryLayout(node, ref fresh, out geometry))
+                {
+                    followRefusal = layoutRefusal;
+                    return false;
+                }
+            }
+            finally { followingSplit = false; }
+            if (fresh.FirstRoad != kept && fresh.SecondRoad != kept)
+            {
+                followRefusal = "The road that stayed is no longer one of the through roads.";
+                return false;
+            }
+            followed = fresh;
+            return true;
+        }
+
+        private bool IsConnected(Entity node, Entity edge)
+        {
+            if (edge == Entity.Null || !EntityManager.Exists(edge) || EntityManager.HasComponent<Deleted>(edge) ||
+                !EntityManager.HasBuffer<ConnectedEdge>(node)) return false;
+            foreach (var item in EntityManager.GetBuffer<ConnectedEdge>(node, true))
+                if (item.m_Edge == edge) return true;
+            return false;
+        }
+
         private void Remove(Entity node)
         {
+            rebuilding.Remove(node);
             var placement = EntityManager.GetComponentData<ClosedMedian>(node);
             MedianTextureSystem.Clear(EntityManager, placement.FirstRoad, node);
             MedianTextureSystem.Clear(EntityManager, placement.SecondRoad, node);
@@ -1392,6 +1521,7 @@ namespace ConditionalMedians2
         internal void ResetControls()
         {
             active.Clear();
+            rebuilding.Clear();
             draining.Clear();
             confirmed.Clear();
             diagnosedPrefabs.Clear();
